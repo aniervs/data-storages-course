@@ -1,6 +1,7 @@
 import psycopg2
 from decouple import config
-
+from faker import Faker
+import random
 
 def connect():
     DATABASE_NAME = config('DATABASE_NAME')
@@ -58,7 +59,53 @@ CREATE TABLE diary_records (
     tags TEXT -- Assuming a comma-separated list of tags, you can adjust this based on your needs
 );
 """
-    connection = connect()
-    connection.execute(query)
-    connection.execute("COMMIT")
+    cursor = connect()
+    cursor.execute(query)
+    cursor.execute("COMMIT")
 
+
+def seed_tables():
+    fake = Faker()
+
+    # Connect to the database
+    cursor = connect()
+
+    num_users = 10
+    num_plans = 3
+    num_records_per_user = 5
+
+    for _ in range(num_plans):
+        cursor.execute(
+            "INSERT INTO subscription_plans (name, plans) VALUES (%s, %s)", (fake.word(), fake.text(max_nb_chars=100))
+        )
+
+    # Insert fake users, payments, diaries, and diary_records
+    for _ in range(num_users):
+        # Insert user
+        cursor.execute(
+            "INSERT INTO users (email, name, password, created_on) VALUES (%s, %s, %s, %s)",
+            (fake.email(), fake.name(), fake.password(), fake.date_between(start_date='-1y', end_date='today'))
+        )
+        user_id = cursor.fetchone()[0]
+
+        # Insert payment
+        cursor.execute(
+            "INSERT INTO payments (user_id, plan_id, payment_date, amount) VALUES (%s, %s, %s, %s)",
+            (user_id, random.randint(1, num_plans), fake.date_between(start_date='-1y', end_date='today'), fake.random_number(digits=2))
+        )
+
+        # Insert diary
+        cursor.execute(
+            "INSERT INTO diaries (user_id) VALUES (%s)",
+            (user_id,)
+        )
+        diary_id = cursor.fetchone()[0]
+
+        # Insert diary records
+        for _ in range(num_records_per_user):
+            cursor.execute(
+                "INSERT INTO diary_records (diary_id, title, created_on, text, tags) VALUES (%s, %s, %s, %s, %s)",
+                (diary_id, fake.sentence(), fake.date_between(start_date='-1y', end_date='today'), fake.text(max_nb_chars=500), ','.join(fake.words(nb=5)))
+            )
+
+    cursor.execute("COMMIT")
