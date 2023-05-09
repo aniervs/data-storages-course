@@ -1,3 +1,4 @@
+import bcrypt
 import psycopg2
 from decouple import config
 from faker import Faker
@@ -127,11 +128,17 @@ def seed_tables(schema: str):
         # Insert fake users, payments, diaries, and diary_records
         for _ in range(num_users):
             # Insert user
+            salt = bcrypt.gensalt()
+            email = fake.email()
+            open_pwd = fake.password()
+            pwd = bcrypt.hashpw(open_pwd.encode(), salt).decode()
             cursor.execute(
                 f"INSERT INTO {schema}.users (email, name, password, created_on) VALUES (%s, %s, %s, %s) RETURNING user_id",
-                (fake.email(), fake.name(), fake.password(), fake.date_between(start_date='-1y', end_date='today'))
+                (email, fake.name(), pwd, fake.date_between(start_date='-1y', end_date='today'))
             )
             user_id = cursor.fetchone()[0]
+
+            print(f"Created user {user_id} {email} with pwd {open_pwd}")
 
             # Insert payment
             cursor.execute(
