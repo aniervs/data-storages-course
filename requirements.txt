@@ -1,3 +1,12 @@
-Faker==18.7.0
-psycopg2_binary==2.9.6
-python-decouple==3.8
+Faker>=18.7.0
+pip>=23.1.2
+requests>=2.30.0
+python-dateutil>=2.8.2
+yarg>=0.1.9
+certifi>=2023.5.7
+docopt>=0.6.2
+pipreqs>=0.4.13
+six>=1.16.0
+idna>=3.4
+urllib3>=2.0.2
+setuptools>=67.7.2
