@@ -3,6 +3,7 @@ import psycopg2
 from decouple import config
 from faker import Faker
 import random
+import datetime
 
 
 def connect():
@@ -58,11 +59,12 @@ def create_tables(schema: str):
         conn.commit()
 
         query = f"""
-        CREATE TABLE if not exists {schema}.subscription_plans (
-            plan_id SERIAL PRIMARY KEY,
-            name VARCHAR(255) UNIQUE NOT NULL,
-            plans TEXT NOT NULL
-        );
+            CREATE TABLE if not exists {schema}.subscription_plans (
+                plan_id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                plans TEXT NOT NULL,
+                price DECIMAL(10,2) NOT NULL
+            );
         """
         cursor.execute(query)
         conn.commit()
@@ -118,9 +120,14 @@ def seed_tables(schema: str):
     print(f"Generating data - {num_users} users, {num_records_per_user} records for each.")
 
     with conn.cursor() as cursor:
+        # Insert fake subscription plans with random price
         for _ in range(num_plans):
+            name = fake.word()
+            plans = fake.text(max_nb_chars=100)
+            price = round(random.uniform(1, 100), 2)
             cursor.execute(
-                f"INSERT INTO {schema}.subscription_plans (name, plans) VALUES (%s, %s)", (fake.word(), fake.text(max_nb_chars=100))
+                f"INSERT INTO {schema}.subscription_plans (name, plans, price) VALUES (%s, %s, %s)",
+                (name, plans, price)
             )
 
         conn.commit()
@@ -139,6 +146,10 @@ def seed_tables(schema: str):
             user_id = cursor.fetchone()[0]
 
             print(f"Created user {user_id} {email} with pwd {open_pwd}")
+
+            # Select random subscription plan
+            cursor.execute(f"SELECT plan_id FROM {schema}.subscription_plans ORDER BY RANDOM() LIMIT 1")
+            plan_id = cursor.fetchone()[0]
 
             # Insert payment
             cursor.execute(
@@ -167,3 +178,52 @@ def seed_tables(schema: str):
     conn.close()
 
     print("Data generated.")
+
+
+
+def subscribe(user_id: int, plan_id: str, payment_date: datetime.date, amount: float) -> bool:
+    
+    # generate fake data for the user transaction
+    fake = Faker()
+    user_id = fake.uuid4()
+    payment_date = fake.date_between(start_date='-365d', end_date='today')
+    
+    # establish the database connection and begin transaction
+    conn = None
+    try:
+        conn = connect()
+        cursor = conn.cursor()
+        cursor.execute('BEGIN TRANSACTION')
+
+        # check if the plan_id exists in the subscription_plans table
+        sql = 'SELECT COUNT(*) FROM subscription_plans WHERE plan_id = %s'
+        cursor.execute(sql, (plan_id,))
+        if cursor.fetchone()[0] == 0:
+            print(f'Plan with ID {plan_id} does not exist.')
+            return False
+        
+        # get the price of the subscription plan
+        sql = 'SELECT price FROM subscription_plans WHERE plan_id = %s'
+        cursor.execute(sql, (plan_id,))
+        amount = cursor.fetchone()[0]
+
+        # insert the user transaction data into the database
+        sql = 'INSERT INTO user_transactions (user_id, plan_id, payment_date, amount) VALUES (%s, %s, %s, %s)'
+        cursor.execute(sql, (user_id, plan_id, payment_date, amount))
+
+        # commit the transaction
+        conn.commit()
+
+        return True
+
+    except Exception as e:
+        # rollback the transaction if an error occurs
+        if conn:
+            conn.rollback()
+        print(str(e))
+        return False
+
+    finally:
+        # close the database connection
+        if conn:
+            conn.close()
