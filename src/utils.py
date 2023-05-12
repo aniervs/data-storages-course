@@ -42,6 +42,24 @@ def ensure_schema(*, drop_if_exists = False):
     conn.close()
     return SCHEMA_NAME
 
+
+def drop_tables(schema: str):
+    conn = connect()
+    with conn.cursor() as cur:
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.users CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.payments CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.subscription_plans CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.diaries CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.diary_records CASCADE;""")
+
+        # Commit the changes
+        conn.commit()
+
+    # Close the connection to the PostgreSQL database
+    conn.close()
+
+
+
 def create_tables(schema: str):
     conn = connect()
     with conn.cursor() as cursor:
