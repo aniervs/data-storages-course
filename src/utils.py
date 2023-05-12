@@ -24,7 +24,7 @@ def connect():
     return connection
 
 
-def ensure_schema(*, drop_if_exists = False):
+def ensure_schema(*, drop_if_exists=False):
     SCHEMA_NAME = config('SCHEMA_NAME')
     conn = connect()
     with conn.cursor() as cursor:
@@ -42,14 +42,32 @@ def ensure_schema(*, drop_if_exists = False):
     conn.close()
     return SCHEMA_NAME
 
+
+def drop_tables(schema: str):
+    conn = connect()
+    with conn.cursor() as cur:
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.users CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.payments CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.subscription_plans CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.diaries CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.diary_records CASCADE;""")
+
+        # Commit the changes
+        conn.commit()
+
+    # Close the connection to the PostgreSQL database
+    conn.close()
+
+
+
 def create_tables(schema: str):
     conn = connect()
     with conn.cursor() as cursor:
-
         query = f"""
         CREATE TABLE if not exists {schema}.users (
             user_id SERIAL PRIMARY KEY,
             email VARCHAR(255) UNIQUE NOT NULL,
+            balance FLOAT,
             name VARCHAR(255) NOT NULL,
             password VARCHAR(255) NOT NULL,
             created_on TIMESTAMP NOT NULL
@@ -107,6 +125,7 @@ def create_tables(schema: str):
 
     print("Tables created.")
 
+
 def seed_tables(schema: str):
     fake = Faker()
 
@@ -138,10 +157,11 @@ def seed_tables(schema: str):
             salt = bcrypt.gensalt()
             email = fake.email()
             open_pwd = fake.password()
+            balance = fake.random.uniform(0, 10000)
             pwd = bcrypt.hashpw(open_pwd.encode(), salt).decode()
             cursor.execute(
-                f"INSERT INTO {schema}.users (email, name, password, created_on) VALUES (%s, %s, %s, %s) RETURNING user_id",
-                (email, fake.name(), pwd, fake.date_between(start_date='-1y', end_date='today'))
+                f"INSERT INTO {schema}.users (email, name, password, balance, created_on) VALUES (%s, %s, %s, %s, %s) RETURNING user_id",
+                (email, fake.name(), pwd, balance, fake.date_between(start_date='-1y', end_date='today'))
             )
             user_id = cursor.fetchone()[0]
 
@@ -180,14 +200,7 @@ def seed_tables(schema: str):
     print("Data generated.")
 
 
-
-def subscribe(user_id: int, plan_id: str, payment_date: datetime.date, amount: float) -> bool:
-    
-    # generate fake data for the user transaction
-    fake = Faker()
-    user_id = fake.uuid4()
-    payment_date = fake.date_between(start_date='-365d', end_date='today')
-    
+def pay_subscription(user_id: int, plan_id: int, payment_date: datetime.date) -> bool:
     # establish the database connection and begin transaction
     conn = None
     try:
@@ -195,35 +208,46 @@ def subscribe(user_id: int, plan_id: str, payment_date: datetime.date, amount: f
         cursor = conn.cursor()
         cursor.execute('BEGIN TRANSACTION')
 
-        # check if the plan_id exists in the subscription_plans table
-        sql = 'SELECT COUNT(*) FROM subscription_plans WHERE plan_id = %s'
-        cursor.execute(sql, (plan_id,))
-        if cursor.fetchone()[0] == 0:
-            print(f'Plan with ID {plan_id} does not exist.')
-            return False
-        
         # get the price of the subscription plan
         sql = 'SELECT price FROM subscription_plans WHERE plan_id = %s'
         cursor.execute(sql, (plan_id,))
+
         amount = cursor.fetchone()[0]
+        # check if the plan_id exists in the subscription_plans table
+        if amount is None:
+            print(f'Plan with ID {plan_id} does not exist.')
+            raise ValueError(f'Plan with ID {plan_id} does not exist.')
+
+        # get the balance of the user
+        sql = 'SELECT balance FROM subscription_plans WHERE user_id = %s'
+        cursor.execute(sql, (user_id,))
+
+        balance = cursor.fetchone()[0]
+        # check if the user exists
+        if balance is None:
+            print(f'User with ID {user_id} does not exist.')
+            raise ValueError(f'User with ID {user_id} does not exist.')
+
+        assert balance >= amount, f'User with ID {user_id} does not have enough balance for this transaction to happen'
 
         # insert the user transaction data into the database
         sql = 'INSERT INTO user_transactions (user_id, plan_id, payment_date, amount) VALUES (%s, %s, %s, %s)'
         cursor.execute(sql, (user_id, plan_id, payment_date, amount))
 
+        # update the balance of the user
+        balance -= amount
+        sql = 'UPDATE users SET balance = %s WHERE user_id = %s'
+        cursor.execute(sql, (balance, user_id))
+
         # commit the transaction
         conn.commit()
-
-        return True
-
-    except Exception as e:
+    except Exception as error:
         # rollback the transaction if an error occurs
         if conn:
             conn.rollback()
-        print(str(e))
-        return False
-
+        print(str(error))
     finally:
         # close the database connection
         if conn:
             conn.close()
+
