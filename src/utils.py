@@ -206,6 +206,7 @@ def pay_subscription(user_id: int, plan_id: int, payment_date: datetime.date) ->
     try:
         conn = connect()
         cursor = conn.cursor()
+        cursor.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;")
         cursor.execute('BEGIN TRANSACTION')
 
         # get the price of the subscription plan
