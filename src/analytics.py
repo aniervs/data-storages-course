@@ -15,7 +15,7 @@ def create_daily_analytics_data_mart(schema: str):
             total_diary_records INTEGER,
             average_text_length FLOAT,
             total_subscription INTEGER,
-            total_revenue FLOAT,
+            total_revenue FLOAT
         );
         """
         cursor.execute(query)
@@ -42,7 +42,6 @@ def populate_data_mart(schema: str):
         )
         SELECT 
             dt.date,
-            COUNT(DISTINCT p.user_id) AS total_subscribed_users,
             COUNT(DISTINCT d.user_id) AS total_active_users,
             COUNT(DISTINCT dr.record_id) AS total_diary_records,
             AVG(LENGTH(dr.text)) AS average_text_length,
