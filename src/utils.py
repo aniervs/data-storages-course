@@ -46,11 +46,13 @@ def ensure_schema(*, drop_if_exists=False):
 def drop_tables(schema: str):
     conn = connect()
     with conn.cursor() as cur:
-        cur.execute(f"""DROP TABLE IF EXISTS {schema}.users CASCADE;""")
-        cur.execute(f"""DROP TABLE IF EXISTS {schema}.payments CASCADE ;""")
-        cur.execute(f"""DROP TABLE IF EXISTS {schema}.subscription_plans CASCADE;""")
-        cur.execute(f"""DROP TABLE IF EXISTS {schema}.diaries CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.user_activity_datamart CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.user_activity CASCADE;""")
         cur.execute(f"""DROP TABLE IF EXISTS {schema}.diary_records CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.diaries CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.payments CASCADE ;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.users CASCADE;""")
+        cur.execute(f"""DROP TABLE IF EXISTS {schema}.subscription_plans CASCADE;""")
 
         # Commit the changes
         conn.commit()
@@ -121,6 +123,49 @@ def create_tables(schema: str):
         cursor.execute(query)
         conn.commit()
 
+    # create table for storing user activity. For now we have two types of activity: entering the system and adding diary records
+    with conn.cursor() as cursor:
+        query = f"""
+        CREATE TABLE if not exists {schema}.user_activity (
+            activity_id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES {schema}.users(user_id),
+            activity_type VARCHAR(255) NOT NULL,
+            activity_date TIMESTAMP NOT NULL
+        );
+        """
+        cursor.execute(query)
+
+        # create indexes on activity_type, user_id and activity_date columns
+        cursor.execute(f"""CREATE INDEX IF NOT EXISTS idx_activity_type ON {schema}.user_activity(activity_type);""")
+        cursor.execute(f"""CREATE INDEX IF NOT EXISTS idx_user_id ON {schema}.user_activity(user_id);""")
+        cursor.execute(f"""CREATE INDEX IF NOT EXISTS idx_activity_date ON {schema}.user_activity(activity_date);""")
+
+        conn.commit()
+
+
+    # create datamart table to analyze counts of users activity by day, type of activity and hour of the day
+    # table should contain the following columns: record_id, activity_type, activity_date, activity_hour, activity_count
+    # activity_count should be calculated as a number of records for each activity type and hour of the day
+    # we need indexes on activity_type, activity_date and activity_hour columns
+    with conn.cursor() as cursor:
+        query = f"""
+        CREATE TABLE if not exists {schema}.user_activity_datamart (
+            record_id SERIAL PRIMARY KEY,
+            activity_type VARCHAR(255) NOT NULL,
+            activity_date DATE NOT NULL,
+            activity_hour INTEGER NOT NULL,
+            activity_count INTEGER NOT NULL
+        );
+        """
+        cursor.execute(query)
+
+        # create indexes
+        cursor.execute(f"""CREATE INDEX IF NOT EXISTS idx_activity_type ON {schema}.user_activity_datamart(activity_type);""")
+        cursor.execute(f"""CREATE INDEX IF NOT EXISTS idx_activity_date ON {schema}.user_activity_datamart(activity_date);""")
+        cursor.execute(f"""CREATE INDEX IF NOT EXISTS idx_activity_hour ON {schema}.user_activity_datamart(activity_hour);""")
+
+        conn.commit()
+
     conn.close()
 
     print("Tables created.")
@@ -132,9 +177,9 @@ def seed_tables(schema: str):
     # Connect to the database
     conn = connect()
 
-    num_users = 10
+    num_users = 3
     num_plans = 3
-    num_records_per_user = 50
+    num_records_per_user = 100
 
     print(f"Generating data - {num_users} users, {num_records_per_user} records for each.")
 
@@ -193,6 +238,29 @@ def seed_tables(schema: str):
                      fake.text(max_nb_chars=500), ','.join(fake.words(nb=5)))
                 )
 
+            # Fill user activity table with random data. We will use this table to populate the datamart
+            # We will assume that users enter the system and add diary records
+            # We have two types of activity: entering the system (name: login) and adding diary records (diary_record)
+            for _ in range(num_records_per_user):
+                cursor.execute(
+                    f"INSERT INTO {schema}.user_activity (user_id, activity_type, activity_date) VALUES (%s, %s, %s)",
+                    (user_id, random.choice(['login', 'diary_record']), fake.date_time_between(start_date='-30d', end_date='now'))
+                )
+
+            conn.commit()
+
+    # Fill datamart table with data based on user activity table data
+    # We will use this table to analyze user activity by day, type of activity and hour of the day
+    with conn.cursor() as cursor:
+        cursor.execute(
+            f"""
+            INSERT INTO {schema}.user_activity_datamart (activity_type, activity_date, activity_hour, activity_count)
+            SELECT activity_type, date(activity_date), EXTRACT(HOUR FROM activity_date) as activity_hour, COUNT(*) as activity_count
+            FROM {schema}.user_activity
+            GROUP BY activity_type, date(activity_date), EXTRACT(HOUR FROM activity_date)
+            ORDER BY date(activity_date), activity_hour
+            """
+        )
         conn.commit()
 
     conn.close()
