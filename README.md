@@ -8,3 +8,7 @@
 
 ## Running the project 
 1. Run `main.py`
+
+## Datamart
+* user_activity_datamart - date, hour, activity type and count
+* daily_analytics_data_mart - total_active_users, total_diary_records, average_text_length, total_subscription, total_revenue
